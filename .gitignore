@@ -1,0 +1,15 @@
+# Python environments and cache
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Local market data and generated results
+phase1_output/
+phase2_output/
+phase1_nifty50/
+phase2_nifty50*/
+phase1_bank_v2/
+phase2_validation*/
+phase2_final/

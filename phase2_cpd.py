@@ -45,7 +45,10 @@ def load_features(root, name, manifest, verify=True):
     relative = f'features/{name}_features.csv'
     path = root / relative
     if verify:
-        expected = manifest.get('sha256', {}).get(relative)
+        # Phase 1 on Windows serializes relative paths with backslashes.
+        canonical_hashes = {key.replace(chr(92), '/'): value
+                            for key, value in manifest.get('sha256', {}).items()}
+        expected = canonical_hashes.get(relative)
         if not expected:
             raise ValueError(f'No Phase 1 hash for {relative}; use the original completed snapshot')
         if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
@@ -240,10 +243,6 @@ def main(argv=None):
         p.error('Use an empty output folder; prior decision logs must not be overwritten')
     manifest_path = a.input/'manifest.json'
     manifest = json.loads(manifest_path.read_text())
-    manifest['sha256'] = {
-        key.replace(chr(92), '/'): value
-        for key, value in manifest.get('sha256', {}).items()
-    }
     train_end = manifest['train_end_inclusive']
     val_end = manifest['validation_end_inclusive']
     inputs, summary, hashes = {}, [], {}
@@ -258,7 +257,7 @@ def main(argv=None):
             raise ValueError(f'{name}: no evaluation rows')
         inputs[name] = f
         rel = f'features/{name}_features.csv'
-        hashes[rel] = manifest['sha256'][rel]
+        hashes[rel] = hashlib.sha256((a.input / rel).read_bytes()).hexdigest()
     a.output.mkdir(parents=True, exist_ok=True)
     import matplotlib
     matplotlib.use('Agg')

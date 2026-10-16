@@ -148,17 +148,25 @@ def self_test():
           'chronological splits, train-only scaling, CSV/MultiIndex parsing, duplicate rejection')
 
 
-def main():
+def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--start', default='2010-01-01')
     p.add_argument('--end', help='Exclusive end date; defaults to today in India (today excluded)')
     p.add_argument('--train-end', default='2020-12-31')
     p.add_argument('--validation-end', default='2023-12-31')
-    p.add_argument('--indices', nargs='+', choices=list(SYMBOLS), default=list(SYMBOLS))
+    p.add_argument('--indices', nargs='+', choices=list(SYMBOLS), default=['NIFTY50', 'BANK'])
     p.add_argument('--input-dir', type=Path, help='Offline NAME.csv files, each with Date,Close')
     p.add_argument('--output', type=Path, default=Path('phase1_output'))
     p.add_argument('--self-test', action='store_true')
-    args = p.parse_args()
+    p.add_argument('--ticker', action='append', default=[], metavar='NAME=SYMBOL',
+                   help='Override a Yahoo ticker for the SAME index; repeat as needed')
+    args = p.parse_args(argv)
+    symbols = SYMBOLS.copy()
+    for item in args.ticker:
+        name, separator, symbol = item.partition('=')
+        if not separator or name not in symbols or not symbol.strip():
+            p.error('--ticker requires a known NAME and nonempty SYMBOL, e.g. BANK=^NSEBANK')
+        symbols[name] = symbol.strip()
     if args.self_test:
         self_test()
         return
@@ -181,11 +189,14 @@ def main():
                 import yfinance as yf
             except ImportError as exc:
                 raise SystemExit('Install yfinance or supply --input-dir. See the guide.') from exc
-            frame = yf.download(SYMBOLS[name], start=args.start, end=end,
+            print(f'Downloading {name}: {symbols[name]}')
+            frame = yf.download(symbols[name], start=args.start, end=end,
                 interval='1d', auto_adjust=False, back_adjust=False, repair=False,
                 keepna=True, progress=False, threads=False)
         if frame is None or frame.empty:
-            raise ValueError(f'{name}: empty data; verify symbol or use a local index CSV')
+            raise ValueError(f'{name} ({symbols[name]}): empty download. This may be unavailable history, '
+                             'rate limiting, or a symbol issue. Try a smaller --indices list '
+                             'or use --input-dir. Do not substitute an ETF silently.')
         series[name] = clean_close(frame, args.start, end)
         fetched[name] = datetime.now(ZoneInfo('UTC')).isoformat()
     # Benchmark observed sessions define the calendar. Never forward/backfill.
@@ -216,7 +227,7 @@ def main():
             metadata.loc[mask].join(f.loc[mask]).to_csv(out / 'splits' / f'{name}_{split}.csv')
             metadata.loc[mask].join(scaled.loc[mask]).to_csv(out / 'splits' / f'{name}_{split}_scaled.csv')
         (out / 'features' / f'{name}_scaler.json').write_text(json.dumps(params, indent=2))
-        quality[name] = {'ticker': SYMBOLS[name], 'source_rows': len(series[name]),
+        quality[name] = {'ticker': symbols[name], 'source_rows': len(series[name]),
             'missing_on_nifty_calendar': int(prices[name].isna().sum()),
             'off_calendar_rows': int((~series[name].index.isin(calendar)).sum()),
             'first_valid_close': str(prices[name].first_valid_index()),
@@ -253,6 +264,7 @@ def main():
     manifest = {'start_inclusive': args.start, 'end_exclusive': end,
         'train_end_inclusive': args.train_end, 'validation_end_inclusive': args.validation_end,
         'source': 'local CSV' if args.input_dir else 'Yahoo Finance via yfinance',
+        'requested_indices': names, 'configured_symbols': symbols,
         'retrieved_utc': fetched, 'versions': versions, 'quality': quality,
         'feature_timing': 'date t uses closes through preceding NIFTY observed session only',
         'scaler_policy': 'training rows only, frozen thereafter; not valid before training is complete',
