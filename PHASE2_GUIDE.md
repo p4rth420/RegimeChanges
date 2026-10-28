@@ -9,9 +9,38 @@ This phase reads the completed Phase 1 dataset and compares two unsupervised cha
 | PELT–L2 | `vol_20` | Changes in the average level of trailing volatility |
 | PELT–RBF | `log_return`, `vol_20` | Broader changes in the distribution of the joint features |
 
-PELT optimizes a penalized segmentation; it is not a supervised classifier. The RBF cost is a kernel method. These pipelines use different feature sets, so differences cannot be attributed solely to the cost function. Their performance must be evaluated in Phase 3. This phase does not implement the HMM benchmark or a portfolio backtest.
+PELT optimizes a penalized segmentation; it is not a supervised classifier. The RBF cost is a kernel method. These pipelines use different feature sets, so differences cannot be attributed solely to the cost function. The validation HMM benchmark is documented below. This project does not include a portfolio backtest.
 
 The implementation reruns an offline algorithm sequentially on trailing history. It is an **as-of simulation**, not an intrinsically online PELT algorithm. It never treats a retrospectively estimated break as a trade that could have happened on that historical date.
+
+## Validation benchmark: three-state Gaussian HMM
+
+The validation benchmark uses `phase3_hmm.py` to fit a three-state diagonal-covariance Gaussian HMM to the training period, using `log_return` and `vol_20` scaled with the Phase 1 training-only scaler. Of ten initializations, the model with the highest training log likelihood was selected. State names (`calm`, `moderate`, `stressed`) are assigned by the states' training probability-weighted mean `vol_20`, from lowest to highest.
+
+Validation probabilities are produced by recursive forward filtering, carrying the training-period filter state into validation. The benchmark does not use backward smoothing, validation data to fit parameters, or the test period. It compares filtered HMM labels with the 252/20 PELT daily descriptive labels and reports how many PELT estimated break dates fall within five feature sessions of an HMM state transition.
+
+On the frozen validation snapshot (2021-01-01 through 2023-12-29; 741 dates), the selected fit converged. Label agreement was 60.2% with PELT–L2 (Cohen's κ=0.38; adjusted Rand index=0.28) and 72.7% with PELT–RBF (κ=0.55; ARI=0.46). Four of six L2 and seven of nine RBF estimated breaks were within five sessions of an HMM transition; the median nearest-transition gap was three sessions for both. The HMM made 23 validation transitions, more than the six L2 and nine RBF confirmed alerts. This indicates closer descriptive alignment with RBF on this validation sample, alongside more frequent state switching. It does not establish that either method is correct: these are unsupervised methods with no ground-truth regime labels, and agreement is not detection accuracy.
+
+Reproduce the comparison with a new, empty output folder:
+
+```bash
+python phase3_hmm.py --input phase1_nifty50 --phase2 phase2_nifty50_validation --output phase3_hmm_validation --states 3 --restarts 10 --seed 1701
+```
+
+The probability, transition, comparison and run-manifest files preserve the validation results. Keep this benchmark separate from the final test evaluation; do not use HMM/test agreement to revise the frozen PELT design.
+
+The combined HMM validation and held-out PELT evaluation are summarized in `PHASE3_EVALUATION.md`.
+
+## Final held-out test run
+
+After freezing the design, the 252/20 settings were run once over the test split (2024-01-01 through 2026-10-27; 696 feature dates and 139 scheduled checks per detector). The training-fitted preprocessing and thresholds were carried forward; validation history remained in the sequential detector state. No parameters were changed after seeing these results.
+
+| Detector | Confirmed test alerts | Median estimated-break-to-alert delay | Delay range |
+|---|---:|---:|---:|
+| PELT–L2 | 8 | 23.5 sessions | 21–31 |
+| PELT–RBF | 9 | 26 sessions | 21–26 |
+
+L2's test alerts were issued on 2024-06-21, 2024-07-22, 2024-08-20, 2025-05-13, 2025-07-08, 2026-03-23, 2026-05-04 and 2026-06-02. RBF's were issued on 2024-02-27, 2024-06-28, 2024-08-12, 2025-05-13, 2025-07-08, 2026-03-16, 2026-04-24, 2026-06-09 and 2026-09-17. These are as-of alert dates; the event CSVs also retain the estimated break dates and source dates. They are not confirmed real-world events or accuracy scores. Review the generated timelines descriptively and keep the settings frozen.
 
 ## Run in your Jupyter notebook
 
@@ -183,7 +212,7 @@ Use the same frozen arguments from the selected validation experiment. The curre
 
 ## Scope and remaining limitations
 
-This is a research detector, not a completed trading strategy. A Phase 3 benchmark can add an HMM with forward-filtered probabilities and documented historical-event comparisons. Phase 4 must use executable instruments, correct fill timing and transaction costs. Never multiply an opening signal by a return that includes an overnight move before the fill.
+This is a research detector, not a completed trading strategy. The Phase 3 HMM benchmark is a descriptive comparison, not ground-truth evaluation. A later portfolio study would need executable instruments, correct fill timing and transaction costs. Never multiply an opening signal by a return that includes an overnight move before the fill.
 
 Current historical Yahoo downloads can contain revisions or pre-launch backfilled index history. Phase 2 preserves Phase 1's timing contract but cannot create a historical data vintage that was not provided. Overlapping rolling-volatility observations are serially dependent; generic RBF distribution-change interpretation and penalties do not establish calibrated financial significance.
 

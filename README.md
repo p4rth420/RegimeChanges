@@ -2,10 +2,11 @@
 
 A time-series project that studies changes in the statistical behaviour of the Indian equity market. The first analysis focuses on the NIFTY 50. It derives causal daily return and volatility features, detects candidate structural changes with PELT, and evaluates the detector in chronological order.
 
-The project has two stages:
+The project has three stages:
 
 1. **Phase 1 — Data and features:** Download or import index closes, validate and align the dates, calculate trailing features, and create chronological train/validation/test splits.
 2. **Phase 2 — Change detection:** Compare PELT with an L2 cost against PELT with an RBF kernel. The detector is rerun on the history available at each decision date and writes an as-of decision log.
+3. **Phase 3 — Validation and test:** Compare frozen PELT outputs with a training-fit, forward-filtered Gaussian HMM on validation, then evaluate the frozen PELT settings once on the held-out test period.
 
 This is an unsupervised change-point project: there are no ground-truth regime labels in the input. Detected segments and volatility labels are analytical estimates, not predictions or proof of market events.
 
@@ -32,14 +33,14 @@ Do not shuffle time-series rows. Use training to fit transformations, validation
 Python 3.10 or newer is recommended. Install the dependencies into the same environment used by Jupyter:
 
 ```bash
-python -m pip install numpy pandas matplotlib yfinance tzdata scipy ruptures
+python -m pip install -r requirements.txt
 ```
 
 In a notebook, use `%pip install ...` so packages install into the active kernel.
 
 ## Run in Jupyter on Windows
 
-Place `phase1_nifty.py` and `phase2_cpd.py` in the notebook's working directory, or give their full paths. Run the Phase 1 verification and data build:
+Place the phase scripts, `requirements.txt`, and notebook in the same working directory, or give their full paths. Run the Phase 1 verification and data build:
 
 ```python
 %run phase1_nifty.py --self-test
@@ -61,11 +62,13 @@ The Phase 2 default excludes test-period observations. After choosing settings o
 
 Use a new, empty output folder for each run. The scripts refuse to overwrite nonempty output folders so earlier snapshots and decision logs are preserved.
 
+For the HMM validation benchmark, install `hmmlearn` from `requirements.txt` and run `phase3_hmm.py` against the Phase 1 snapshot and the validation-only Phase 2 output. The HMM is fit on training data and forward-filtered on validation. It is not run on test.
+
 ## Run the complete workflow in Jupyter
 
-Open `Regime_Change_Pipeline.ipynb` from the project root and run its cells from top to bottom. It installs the dependencies, runs both scripts’ synthetic self-tests, builds a NIFTY 50-only Phase 1 snapshot, inspects its coverage, then runs Phase 2 on validation data with the test period excluded.
+Open `Regime_Change_Pipeline.ipynb` from the project root and run its cells from top to bottom. It installs dependencies, runs the Phase 1 and Phase 2 synthetic self-tests, builds a NIFTY 50-only Phase 1 snapshot, runs the frozen PELT settings on validation, then fits and compares the HMM on validation. The optional final test cell is gated off by default and must only be enabled once after the design is frozen.
 
-In the setup cell, choose `DATA_SOURCE = "yahoo"` to download NIFTY 50 using `^NSEI`, or `DATA_SOURCE = "local_csv"` and set `LOCAL_CSV_DIR` to a folder containing `NIFTY50.csv` with `Date,Close` columns. Change `PHASE1_OUTPUT` and `PHASE2_OUTPUT` when rerunning so each run writes to a fresh folder. The optional final cell shows how to open the test period once the model design is frozen.
+In the setup cell, choose `DATA_SOURCE = "yahoo"` to download NIFTY 50 using `^NSEI`, or `DATA_SOURCE = "local_csv"` and set `LOCAL_CSV_DIR` to a folder containing `NIFTY50.csv` with `Date,Close` columns. Change all output paths when rerunning so each run writes to a fresh folder. The final test switch defaults to `False`.
 
 ## Run from a terminal
 
@@ -115,6 +118,8 @@ The scaled split files use statistics fitted on training rows only. Phase 2 inde
 
 Phase 2 repeatedly runs an offline PELT algorithm on a trailing prefix of history. By default, it updates every five sessions, uses a 252-session maximum window, requires a minimum 20-session segment and applies confirmation/cooldown rules before emitting an alert. These are starting settings, not optimized or statistically calibrated market parameters. Test model settings on validation only.
 
+On validation, the frozen PELT setup was compared with a three-state Gaussian HMM fit on training data only and applied with forward filtering. Label agreement was 60.2% for HMM vs PELT–L2 and 72.7% for HMM vs PELT–RBF. The HMM made 23 transitions, indicating more frequent switching than PELT's confirmed alerts. These are comparisons between unsupervised methods, not accuracy against known regimes. See `PHASE2_GUIDE.md` for the full HMM validation results and limitations.
+
 The estimated break date can move as new observations arrive. The logged `decision_date` records when an alert was actually available; past alerts are not backdated. Because Phase 1 features are lagged, a decision on date `t` uses data through the preceding session.
 
 ## Look-ahead controls
@@ -153,9 +158,11 @@ A change point indicates a statistical shift under a chosen feature, cost and pe
 - `phase1_nifty.py` — data download, preprocessing and feature generation.
 - `PHASE1_GUIDE.md` — Phase 1 methodology and data dictionary.
 - `phase2_cpd.py` — sequential PELT–L2 and PELT–RBF runs.
-- `PHASE2_GUIDE.md` — model timing, outputs, settings and limitations.
+- `phase3_hmm.py` — train-only Gaussian HMM fit and forward-filtered validation comparison.
+- `PHASE2_GUIDE.md` — PELT/HMM methods, validation results, outputs, settings and limitations.
+- `PHASE3_EVALUATION.md` — validation HMM benchmark and frozen held-out test review.
 - `README.md` — project overview and quick start.
-- `Regime_Change_Pipeline.ipynb` — ordered Jupyter workflow for both phases.
+- `Regime_Change_Pipeline.ipynb` — ordered Jupyter workflow for Phase 1, PELT validation, HMM validation, and the gated final test run.
 
 ## Sources
 
